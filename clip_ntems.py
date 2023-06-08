@@ -15,7 +15,7 @@ STRUCTURES = [
 
 
 def normalize_image(img, nodata):
-    if any(x is None for x in nodata):
+    if nodata is not None:
         mask = img == nodata  # create a boolean mask of nodata values
         img = np.ma.masked_array(
             img, mask
@@ -25,12 +25,12 @@ def normalize_image(img, nodata):
         X = img[i, :, :]
         low = np.min(X)
         high = np.max(X)
-
-        img[i, :, :] = (X - low) / (high - low) * 255
-        img[i, :, :][mask[i, :, :]] = 0  # set nodata values to 0
-
+        # Normalize img to 1 - 255, leave 0 for nodata
+        img[i, :, :] = (X - low) / (high - low) * 254 + 1
         assert np.amax(img[i, :, :]) == 255
-        assert np.amin(img[i, :, :]) == 0
+        assert np.amin(img[i, :, :]) == 1
+        # set nodata values to 0
+        img[i, :, :][mask[i, :, :]] = 0
 
     # Convert back to regular numpy array
     img = np.ma.filled(img, fill_value=0)
@@ -63,6 +63,7 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir):
     with fiona.open(aoi_path, "r") as shapefile:
         for feature in shapefile:
             tile_id = feature["properties"]["Id"]
+            print("Processing tile: ", tile_id)
             tile_dir = make_tile_dir(out_dir, tile_id, rasin_name)
             geometry = feature["geometry"]
             shapely_geometry = shape(geometry)
@@ -77,8 +78,9 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir):
                 nodata = src.nodatavals
                 win = rasterio.windows.from_bounds(*bounds, transform=src.transform)
                 win_image = src.read(window=win)
-                # Count how many nodata values are in the image
-                print("nodata count: ", np.count_nonzero(win_image == nodata))
+                # Assert nodata are either a tuple of all None or a tuple of equal values
+                assert all(x is None for x in nodata) or len(set(nodata)) == 1
+                nodata = nodata[0]
                 print("win image shape: ", win_image.shape)
                 win_transform = src.window_transform(win)
                 profile.update(
@@ -91,6 +93,9 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir):
                 write_raster_to_file(win_image, out_path, profile)
                 norm_win_image = normalize_image(win_image, nodata)
                 norm_profile = profile.copy()
+                # Ideally should be two cases:
+                # Case 1: for BAP, we should not have invalid data (represent the valid range from 1-255)
+                # Case 2: for other rasters, we should have invalid data which we will set to 0
                 norm_profile.update(dtype=rasterio.uint8, nodata=0)
                 write_raster_to_file(norm_win_image, out_norm_path, norm_profile)
 
