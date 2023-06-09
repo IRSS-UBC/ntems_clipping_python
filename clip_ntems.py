@@ -4,14 +4,15 @@ import rasterio
 from shapely.geometry import shape
 import numpy as np
 import os
+import subprocess
 
-STRUCTURES = [
-    "loreys_height",
-    "elev_p95",
-    "elev_cv",
-    "gross_stem_volume",
-    "total_biomass",
-]
+STRUCTURE_SHORTNAMES = {
+    "loreys_height": "lh",
+    "elev_p95": "p95",
+    "elev_cv": "cv",
+    "gross_stem_volume": "vol",
+    "total_biomass": "bio",
+}
 
 
 def normalize_image(img, nodata):
@@ -50,8 +51,33 @@ def write_raster_to_file(image, filename, profile):
         dst.write(image)
 
 
-def make_tile_dir(out_dir, tile_id, rasin_name):
-    if rasin_name in ["elev_p95", "elev_cv", "gross_stem_volume", "total_biomass"]:
+def change_interleave_with_gdal(input_file, output_file):
+    cmd = ["gdal_translate", "-co", "INTERLEAVE=PIXEL", input_file, output_file]
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+
+    if process.returncode != 0:
+        print(f"Error: {stderr.decode()}")
+    else:
+        print(f"Success: {stdout.decode()}")
+
+
+def add_tmp_to_filename(path):
+    # split the path into directory, base (file name), and extension
+    dir_name, file_name = os.path.split(path)
+    base, ext = os.path.splitext(file_name)
+
+    # append '_tmp' to the base name, keep the extension the same
+    new_base = base + "_tmp"
+
+    # join all components back into a full path
+    new_path = os.path.join(dir_name, new_base + ext)
+
+    return new_path
+
+
+def make_tile_dir_if_not_exist(out_dir, tile_id, rasin_name):
+    if rasin_name in STRUCTURE_SHORTNAMES or rasin_name == "merged":
         tile_dir = out_dir + "tile_" + str(tile_id) + f"/structure/{rasin_name}/"
     else:
         tile_dir = out_dir + "tile_" + str(tile_id) + f"/{rasin_name}/"
@@ -59,12 +85,15 @@ def make_tile_dir(out_dir, tile_id, rasin_name):
     return tile_dir
 
 
+# Clip a single ntem to an AOI
 def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir):
     with fiona.open(aoi_path, "r") as shapefile:
         for feature in shapefile:
             tile_id = feature["properties"]["Id"]
+            if tile_id != 434:
+                continue
             print("Processing tile: ", tile_id)
-            tile_dir = make_tile_dir(out_dir, tile_id, rasin_name)
+            tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, rasin_name)
             geometry = feature["geometry"]
             shapely_geometry = shape(geometry)
             bounds = shapely_geometry.bounds
@@ -72,6 +101,7 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir):
             out_path = tile_dir + f"{rasin_name}-tile-{tile_id}.tif"
             # Path for normalized image
             out_norm_path = tile_dir + f"{rasin_name}-tile-{tile_id}-norm.tif"
+            out_norm_path_tmp = add_tmp_to_filename(out_norm_path)
 
             with rasterio.open(rasin_path) as src:
                 profile = src.profile
@@ -97,13 +127,75 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir):
                 # Case 1: for BAP, we should not have invalid data (represent the valid range from 1-255)
                 # Case 2: for other rasters, we should have invalid data which we will set to 0
                 norm_profile.update(dtype=rasterio.uint8, nodata=0)
-                write_raster_to_file(norm_win_image, out_norm_path, norm_profile)
+                write_raster_to_file(norm_win_image, out_norm_path_tmp, norm_profile)
+                change_interleave_with_gdal(out_norm_path_tmp, out_norm_path)
+
+
+def stack_rasters_and_write_to_file(struct_paths, merged_path):
+    merged_path_tmp = add_tmp_to_filename(merged_path)
+    raster_datasets = []
+    raster_data = []
+
+    try:
+        # Open each raster file, append to the datasets list, and read the data into the data list
+        for raster_path in struct_paths:
+            ds = rasterio.open(raster_path)
+            raster_datasets.append(ds)
+            raster_data.append(ds.read())
+
+        out_meta = raster_datasets[0].meta.copy()
+
+        out_meta.update(count=len(raster_datasets))
+
+        # Write the stacked raster to disk
+        with rasterio.open(merged_path_tmp, "w", **out_meta) as dest:
+            for i, data in enumerate(raster_data, start=1):
+                dest.write(np.squeeze(data), i)
+        # TODO: Delete the tmp file afterwards
+        change_interleave_with_gdal(merged_path_tmp, merged_path)
+        print(f"Stacked structure raster saved at: {merged_path}")
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+    finally:
+        # Close all raster datasets
+        for raster_dataset in raster_datasets:
+            raster_dataset.close()
+
+
+def merge_structure_rasters(config):
+    struct_names = []
+    for rasin_name in config["ntems"]:
+        if rasin_name in STRUCTURE_SHORTNAMES:
+            struct_names.append(rasin_name)
+
+    aoi_path = config["aoi_path"]
+    out_dir = config["out_dir"]
+    with fiona.open(aoi_path, "r") as shapefile:
+        for feature in shapefile:
+            tile_id = feature["properties"]["Id"]
+            print(f"Merging {len(struct_names)} structure layers for tile: {tile_id}")
+            struct_paths = []
+            for rasin_name in struct_names:
+                tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, rasin_name)
+                struct_paths.append(tile_dir + f"{rasin_name}-tile-{tile_id}-norm.tif")
+            # Merge all structure layers into a single raster
+            merged_path_prefix = "-".join(
+                [STRUCTURE_SHORTNAMES[name] for name in struct_names]
+            )
+            tile_merged_path = make_tile_dir_if_not_exist(out_dir, tile_id, "merged")
+            merged_path = (
+                tile_merged_path + f"{merged_path_prefix}-tile-{tile_id}-norm.tif"
+            )
+            stack_rasters_and_write_to_file(struct_paths, merged_path)
+            break
 
 
 def clip_multiple_ntems_to_aoi(config):
     out_dir = config["out_dir"]
     for rasin_name in config["ntems"]:
-        if rasin_name in STRUCTURES:
+        if rasin_name in STRUCTURE_SHORTNAMES:
             rasin_dir = os.path.join(config["rasin_dir"], "structure", rasin_name)
         else:
             rasin_dir = os.path.join(config["rasin_dir"], rasin_name)
@@ -111,3 +203,6 @@ def clip_multiple_ntems_to_aoi(config):
         print("Processing raster path: ", rasin_path)
         assert rasin_path is not None
         clip_ntems_to_aoi(rasin_name, rasin_path, config["aoi_path"], out_dir)
+
+    if config["merge_structures"]:
+        merge_structure_rasters(config)

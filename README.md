@@ -18,3 +18,5 @@ rasin_dir/
 ```
 
 3. Invoke the python script by running `python main.py --out_dir {your_path} --rasin_dir {your_path} --aoi_path {your_path}`
+
+4. if pass in the `--merge_structures` flag, the normalized structure layers will be merged into a single file under merged/ directory.
