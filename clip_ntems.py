@@ -14,6 +14,20 @@ STRUCTURE_SHORTNAMES = {
     "total_biomass": "bio",
 }
 
+# Set this to the tile ids you want to exclude
+EXCLUDED_TILES = []
+
+NON_FOREST_LULC = {
+    20: "water",
+    31: "snow/ice",
+    32: "rock/rubble",
+    33: "exposed/barren land",
+    40: "bryoid",
+    50: "shrubland",
+    80: "wetland",
+    100: "herbs",
+}
+
 
 def normalize_image(img, nodata):
     if nodata is not None:
@@ -85,12 +99,24 @@ def make_tile_dir_if_not_exist(out_dir, tile_id, rasin_name):
     return tile_dir
 
 
+def prepare_mask_from_vlce(win_image):
+    mask = np.zeros(win_image.shape)
+    for row in range(win_image.shape[1]):
+        for col in range(win_image.shape[2]):
+            if win_image[0, row, col] in NON_FOREST_LULC:
+                mask[0, row, col] = 0
+            else:
+                mask[0, row, col] = 1
+    print(f"number of zeros: {mask.size - np.count_nonzero(mask)}")
+    return mask
+
+
 # Clip a single ntem to an AOI
 def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir):
     with fiona.open(aoi_path, "r") as shapefile:
         for feature in shapefile:
             tile_id = feature["properties"]["Id"]
-            if tile_id != 434:
+            if tile_id in EXCLUDED_TILES:
                 continue
             print("Processing tile: ", tile_id)
             tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, rasin_name)
@@ -121,14 +147,20 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir):
                     transform=win_transform,
                 )
                 write_raster_to_file(win_image, out_path, profile)
-                norm_win_image = normalize_image(win_image, nodata)
-                norm_profile = profile.copy()
-                # Ideally should be two cases:
+                updated_profile = profile.copy()
+                # Two cases can share the same profile:
                 # Case 1: for BAP, we should not have invalid data (represent the valid range from 1-255)
                 # Case 2: for other rasters, we should have invalid data which we will set to 0
-                norm_profile.update(dtype=rasterio.uint8, nodata=0)
-                write_raster_to_file(norm_win_image, out_norm_path_tmp, norm_profile)
-                change_interleave_with_gdal(out_norm_path_tmp, out_norm_path)
+                updated_profile.update(dtype=rasterio.uint8, nodata=0)
+                if rasin_name == "VLCE2.0":
+                    mask = prepare_mask_from_vlce(win_image)
+                    write_raster_to_file(mask, out_path, updated_profile)
+                else:
+                    norm_win_image = normalize_image(win_image, nodata)
+                    write_raster_to_file(
+                        norm_win_image, out_norm_path_tmp, updated_profile
+                    )
+                    change_interleave_with_gdal(out_norm_path_tmp, out_norm_path)
 
 
 def stack_rasters_and_write_to_file(struct_paths, merged_path):
@@ -175,6 +207,8 @@ def merge_structure_rasters(config):
     with fiona.open(aoi_path, "r") as shapefile:
         for feature in shapefile:
             tile_id = feature["properties"]["Id"]
+            if tile_id in EXCLUDED_TILES:
+                continue
             print(f"Merging {len(struct_names)} structure layers for tile: {tile_id}")
             struct_paths = []
             for rasin_name in struct_names:
@@ -189,7 +223,6 @@ def merge_structure_rasters(config):
                 tile_merged_path + f"{merged_path_prefix}-tile-{tile_id}-norm.tif"
             )
             stack_rasters_and_write_to_file(struct_paths, merged_path)
-            break
 
 
 def clip_multiple_ntems_to_aoi(config):

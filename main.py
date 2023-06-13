@@ -40,7 +40,7 @@ def main():
         "out_dir": out_dir,
         "rasin_dir": rasin_dir,
         "aoi_path": aoi_path,
-        "ntems": ["proxies", "elev_p95", "elev_cv"],
+        "ntems": ["VLCE2.0", "proxies", "elev_p95"],
     }
     clip_multiple_ntems_to_aoi(config)
 
