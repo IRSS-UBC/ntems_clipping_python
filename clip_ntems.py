@@ -17,15 +17,11 @@ STRUCTURE_SHORTNAMES = {
 # Set this to the tile ids you want to exclude
 EXCLUDED_TILES = []
 
-NON_FOREST_LULC = {
-    20: "water",
-    31: "snow/ice",
-    32: "rock/rubble",
-    33: "exposed/barren land",
-    40: "bryoid",
-    50: "shrubland",
-    80: "wetland",
-    100: "herbs",
+FOREST_LULC = {
+    81: "wetland-treed",
+    210: "coniferous",
+    220: "broadleaf",
+    230: "mixed-wood",
 }
 
 
@@ -103,9 +99,7 @@ def prepare_mask_from_vlce(win_image):
     mask = np.zeros(win_image.shape)
     for row in range(win_image.shape[1]):
         for col in range(win_image.shape[2]):
-            if win_image[0, row, col] in NON_FOREST_LULC:
-                mask[0, row, col] = 0
-            else:
+            if win_image[0, row, col] in FOREST_LULC:
                 mask[0, row, col] = 1
     print(f"number of zeros: {mask.size - np.count_nonzero(mask)}")
     return mask
@@ -154,7 +148,8 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir):
                 updated_profile.update(dtype=rasterio.uint8, nodata=0)
                 if rasin_name == "VLCE2.0":
                     mask = prepare_mask_from_vlce(win_image)
-                    write_raster_to_file(mask, out_path, updated_profile)
+                    mask_path = tile_dir + f"{rasin_name}-tile-{tile_id}-mask.tif"
+                    write_raster_to_file(mask, mask_path, updated_profile)
                 else:
                     norm_win_image = normalize_image(win_image, nodata)
                     write_raster_to_file(
