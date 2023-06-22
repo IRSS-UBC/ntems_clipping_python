@@ -1,10 +1,11 @@
 import fiona
 from shapely.geometry import shape
 import rasterio
-from shapely.geometry import shape
+import geopandas as gpd
 import numpy as np
 import os
 import subprocess
+from osgeo import gdal
 
 STRUCTURE_SHORTNAMES = {
     "loreys_height": "lh",
@@ -15,7 +16,7 @@ STRUCTURE_SHORTNAMES = {
 }
 
 # Set this to the tile ids you want to exclude
-EXCLUDED_TILES = []
+EXCLUDED_TILES = [512, 513, 514, 473, 474, 475, 434, 436]
 
 FOREST_LULC = {
     81: "wetland-treed",
@@ -26,6 +27,7 @@ FOREST_LULC = {
 
 
 def normalize_image(img, nodata):
+    # Note: this funtion will fali if nodata is nan
     if nodata is not None:
         mask = img == nodata  # create a boolean mask of nodata values
         img = np.ma.masked_array(
@@ -156,6 +158,7 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir):
                         norm_win_image, out_norm_path_tmp, updated_profile
                     )
                     change_interleave_with_gdal(out_norm_path_tmp, out_norm_path)
+                    os.remove(out_norm_path_tmp)
 
 
 def stack_rasters_and_write_to_file(struct_paths, merged_path):
@@ -178,8 +181,8 @@ def stack_rasters_and_write_to_file(struct_paths, merged_path):
         with rasterio.open(merged_path_tmp, "w", **out_meta) as dest:
             for i, data in enumerate(raster_data, start=1):
                 dest.write(np.squeeze(data), i)
-        # TODO: Delete the tmp file afterwards
         change_interleave_with_gdal(merged_path_tmp, merged_path)
+        os.remove(merged_path_tmp)
         print(f"Stacked structure raster saved at: {merged_path}")
 
     except Exception as e:
@@ -220,6 +223,51 @@ def merge_structure_rasters(config):
             stack_rasters_and_write_to_file(struct_paths, merged_path)
 
 
+def crop_vri_shapefile(config):
+    aoi_path = config["aoi_path"]
+    out_dir = config["out_dir"]
+    vri_path = config["vri_path"]
+
+    vri = gpd.read_file(vri_path)
+    aoi = gpd.read_file(aoi_path)
+
+    for _, tile in aoi.iterrows():
+        tile_id = tile["Id"]
+        if tile_id in EXCLUDED_TILES:
+            continue
+        print("Cropping VRI for tile: ", tile_id)
+        # cropped_vri = gpd.clip(vri, tile.geometry)
+        vri["Id"] = range(1, len(vri) + 1)
+
+        vri.to_file("/tmp/temp.shp")
+
+        tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, "VRI")
+
+        out_path = tile_dir + f"ras-VRI-tile-{tile_id}.tif"
+
+        options = gdal.RasterizeOptions(
+            format="GTiff",
+            outputType=gdal.GDT_Float32,
+            noData=-1,
+            creationOptions=["COMPRESS=DEFLATE"],
+            width=5000,
+            height=5000,
+            attribute="Id",
+        )
+        ds = gdal.Rasterize(
+            out_path,
+            "/tmp/temp.shp",
+            options=options,
+        )
+        ds = None  # Close the file
+
+        print(
+            f"Cropped / rasterized VRI for tile {tile_id} has been saved to: {out_path}"
+        )
+
+        break
+
+
 def clip_multiple_ntems_to_aoi(config):
     out_dir = config["out_dir"]
     for rasin_name in config["ntems"]:
@@ -234,3 +282,6 @@ def clip_multiple_ntems_to_aoi(config):
 
     if config["merge_structures"]:
         merge_structure_rasters(config)
+
+    if config["vri_path"]:
+        crop_vri_shapefile(config)

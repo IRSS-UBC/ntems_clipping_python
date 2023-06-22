@@ -11,6 +11,12 @@ def main():
         help="Merge the clipped structure ntems into one file",
     )
     parser.add_argument(
+        "--vri_path",
+        type=str,
+        default="",
+        help="Path to the VRI shapefile",
+    )
+    parser.add_argument(
         "--out_dir",
         type=str,
         default="/home/yye/first_project/ntems_2019/bc/processed_tiles/",
@@ -34,13 +40,15 @@ def main():
     out_dir = args.out_dir
     rasin_dir = args.rasin_dir
     aoi_path = args.aoi_path
+    vri_path = args.vri_path
 
     config = {
         "merge_structures": merge_structures,
+        "vri_path": vri_path,
         "out_dir": out_dir,
         "rasin_dir": rasin_dir,
         "aoi_path": aoi_path,
-        "ntems": ["VLCE2.0", "elev_p95"],
+        "ntems": [],
     }
     clip_multiple_ntems_to_aoi(config)
 
