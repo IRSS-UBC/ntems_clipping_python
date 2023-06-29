@@ -16,7 +16,7 @@ STRUCTURE_SHORTNAMES = {
 }
 
 # Set this to the tile ids you want to exclude
-EXCLUDED_TILES = [512, 513, 514, 473, 474, 475, 434, 436]
+EXCLUDED_TILES = [473, 474, 475, 434, 435, 436]
 
 FOREST_LULC = {
     81: "wetland-treed",
@@ -228,22 +228,26 @@ def crop_vri_shapefile(config):
     out_dir = config["out_dir"]
     vri_path = config["vri_path"]
 
+    print("Reading vri and aoi shapefiles")
     vri = gpd.read_file(vri_path)
     aoi = gpd.read_file(aoi_path)
+    print("Finished reading shapefiles")
 
     for _, tile in aoi.iterrows():
         tile_id = tile["Id"]
         if tile_id in EXCLUDED_TILES:
             continue
-        print("Cropping VRI for tile: ", tile_id)
-        # cropped_vri = gpd.clip(vri, tile.geometry)
-        vri["Id"] = range(1, len(vri) + 1)
-
-        vri.to_file("/tmp/temp.shp")
-
         tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, "VRI")
+        out_ras_path = tile_dir + f"ras-VRI-tile-{tile_id}.tif"
+        out_shp_path = tile_dir + f"VRI-tile-{tile_id}.shp"
 
-        out_path = tile_dir + f"ras-VRI-tile-{tile_id}.tif"
+        print("Cropping VRI for tile: ", tile_id)
+        cropped_vri = gpd.clip(vri, tile.geometry)
+        print("Tile VRI count: ", len(cropped_vri))
+        cropped_vri["Id"] = range(1, len(cropped_vri) + 1)
+
+        cropped_vri.to_file(out_shp_path)
+        print("Saved cropped VRI to: ", out_shp_path)
 
         options = gdal.RasterizeOptions(
             format="GTiff",
@@ -255,17 +259,13 @@ def crop_vri_shapefile(config):
             attribute="Id",
         )
         ds = gdal.Rasterize(
-            out_path,
-            "/tmp/temp.shp",
+            out_ras_path,
+            out_shp_path,
             options=options,
         )
         ds = None  # Close the file
 
-        print(
-            f"Cropped / rasterized VRI for tile {tile_id} has been saved to: {out_path}"
-        )
-
-        break
+        print(f"Saved cropped rasterized VRI to: {out_ras_path}")
 
 
 def clip_multiple_ntems_to_aoi(config):

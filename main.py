@@ -25,13 +25,13 @@ def main():
     parser.add_argument(
         "--rasin_dir",
         type=str,
-        default="/home/yye/first_project/ntems_2019/bc/mosaiced/",
+        default="/home/yye/first_project/ntems_2019/bc_quesnel/mosaiced/",
         help="Directory containing the ntems to be clipped",
     )
     parser.add_argument(
         "--aoi_path",
         type=str,
-        default="/home/yye/first_project/elaine_study_area/study_grid/elaine_study_area.shp",
+        default="/home/yye/first_project/ntems_2019/bc/bc_quesnel_study_area.shp",
         help="Path to the shapefile containing the AOI",
     )
     args = parser.parse_args()
@@ -48,7 +48,13 @@ def main():
         "out_dir": out_dir,
         "rasin_dir": rasin_dir,
         "aoi_path": aoi_path,
-        "ntems": [],
+        "ntems": [
+            "proxies",
+            "elev_p95",
+            "elev_cv",
+            "total_biomass",
+            "gross_stem_volume",
+        ],
     }
     clip_multiple_ntems_to_aoi(config)
 
