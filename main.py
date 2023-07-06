@@ -1,5 +1,24 @@
+# Prepare ntems products and inventory data such as VRI for the area of interest (AOI) in Canada.
+# The raw ntems can be obtained from running ntems_clipping_terra R scripts from the IRSS github repo.
+# This python script provides a way to break down the ntems into smaller tiles -- we have around 300 tiles
+# covering the forested areas in Canada. If you want to clip a smaller area inside each tile, you can do so
+# by specifying the bounding box (bbox) in the format of (column_offset, row_offset, width, height), same
+# as the Window instance from rasterio. If bbox is not specified, the entire tile will be clipped.
+
+# Example usage: python3 main.py --bbox='(0,0,500,500)' --merge_structures
+# The above command will clip the ntems to a 500x500 window starting from the top left corner of the tile, and
+# also merge lidar-derived structure ntems into one file.
+
+import ast
 from clip_ntems import clip_multiple_ntems_to_aoi
 import argparse
+
+
+def tuple_type(s):
+    try:
+        return tuple(ast.literal_eval(s))
+    except:
+        raise argparse.ArgumentTypeError("Tuple arguments must be a tuple")
 
 
 def main():
@@ -25,7 +44,7 @@ def main():
     parser.add_argument(
         "--rasin_dir",
         type=str,
-        default="/home/yye/first_project/ntems_2019/bc_quesnel/mosaiced/",
+        default="/home/yye/first_project/ntems_2019/bc/mosaiced/",
         help="Directory containing the ntems to be clipped",
     )
     parser.add_argument(
@@ -34,6 +53,12 @@ def main():
         default="/home/yye/first_project/ntems_2019/bc/bc_quesnel_study_area.shp",
         help="Path to the shapefile containing the AOI",
     )
+    parser.add_argument(
+        "--bbox",
+        type=tuple_type,
+        default=None,
+        help="Bounding box (column_offset, row_offset, width, height)",
+    )
     args = parser.parse_args()
     # Get the arguments if not empty
     merge_structures = args.merge_structures
@@ -41,6 +66,8 @@ def main():
     rasin_dir = args.rasin_dir
     aoi_path = args.aoi_path
     vri_path = args.vri_path
+    bbox = args.bbox
+    assert bbox is None or len(bbox) == 4
 
     config = {
         "merge_structures": merge_structures,
@@ -48,13 +75,8 @@ def main():
         "out_dir": out_dir,
         "rasin_dir": rasin_dir,
         "aoi_path": aoi_path,
-        "ntems": [
-            "proxies",
-            "elev_p95",
-            "elev_cv",
-            "total_biomass",
-            "gross_stem_volume",
-        ],
+        "bbox": bbox,
+        "ntems": ["proxies", "gross_stem_volume", "total_biomass"],
     }
     clip_multiple_ntems_to_aoi(config)
 

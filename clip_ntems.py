@@ -4,111 +4,25 @@ import rasterio
 import geopandas as gpd
 import numpy as np
 import os
-import subprocess
 from osgeo import gdal
-
-STRUCTURE_SHORTNAMES = {
-    "loreys_height": "lh",
-    "elev_p95": "p95",
-    "elev_cv": "cv",
-    "gross_stem_volume": "vol",
-    "total_biomass": "bio",
-}
-
-# Set this to the tile ids you want to exclude
-EXCLUDED_TILES = [473, 474, 475, 434, 435, 436]
-
-FOREST_LULC = {
-    81: "wetland-treed",
-    210: "coniferous",
-    220: "broadleaf",
-    230: "mixed-wood",
-}
+from rasterio.windows import from_bounds
+from rasterio.transform import xy
+from shapely.geometry import Polygon
+from helper.constants import EXCLUDED_TILES, STRUCTURE_SHORTNAMES
+from helper.io_handler import (
+    find_file,
+    write_raster_to_file,
+    change_interleave_with_gdal,
+    add_tmp_to_filename,
+    make_tile_dir_if_not_exist,
+    make_rasout_names,
+    append_bbox_to_filename_if_exists,
+)
+from helper.process_raster import normalize_image, prepare_mask_from_vlce
 
 
-def normalize_image(img, nodata):
-    # Note: this funtion will fali if nodata is nan
-    if nodata is not None:
-        mask = img == nodata  # create a boolean mask of nodata values
-        img = np.ma.masked_array(
-            img, mask
-        )  # create a masked array, excluding nodata values
-
-    for i in range(img.shape[0]):
-        X = img[i, :, :]
-        low = np.min(X)
-        high = np.max(X)
-        # Normalize img to 1 - 255, leave 0 for nodata
-        img[i, :, :] = (X - low) / (high - low) * 254 + 1
-        assert np.amax(img[i, :, :]) == 255
-        assert np.amin(img[i, :, :]) == 1
-        # set nodata values to 0
-        img[i, :, :][mask[i, :, :]] = 0
-
-    # Convert back to regular numpy array
-    img = np.ma.filled(img, fill_value=0)
-    return img
-
-
-def find_file(target_dir, extension):
-    for file in os.listdir(target_dir):
-        if file.endswith(extension):
-            return os.path.join(target_dir, file)
-    return None
-
-
-def write_raster_to_file(image, filename, profile):
-    print("Writing raster to file: ", filename)
-    with rasterio.open(filename, "w", **profile) as dst:
-        dst.write(image)
-
-
-def change_interleave_with_gdal(input_file, output_file):
-    cmd = ["gdal_translate", "-co", "INTERLEAVE=PIXEL", input_file, output_file]
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-
-    if process.returncode != 0:
-        print(f"Error: {stderr.decode()}")
-    else:
-        print(f"Success: {stdout.decode()}")
-
-
-def add_tmp_to_filename(path):
-    # split the path into directory, base (file name), and extension
-    dir_name, file_name = os.path.split(path)
-    base, ext = os.path.splitext(file_name)
-
-    # append '_tmp' to the base name, keep the extension the same
-    new_base = base + "_tmp"
-
-    # join all components back into a full path
-    new_path = os.path.join(dir_name, new_base + ext)
-
-    return new_path
-
-
-def make_tile_dir_if_not_exist(out_dir, tile_id, rasin_name):
-    if rasin_name in STRUCTURE_SHORTNAMES or rasin_name == "merged":
-        tile_dir = out_dir + "tile_" + str(tile_id) + f"/structure/{rasin_name}/"
-    else:
-        tile_dir = out_dir + "tile_" + str(tile_id) + f"/{rasin_name}/"
-    os.makedirs(tile_dir, exist_ok=True)
-    return tile_dir
-
-
-def prepare_mask_from_vlce(win_image):
-    mask = np.zeros(win_image.shape)
-    for row in range(win_image.shape[1]):
-        for col in range(win_image.shape[2]):
-            if win_image[0, row, col] in FOREST_LULC:
-                mask[0, row, col] = 1
-    print(f"number of zeros: {mask.size - np.count_nonzero(mask)}")
-    return mask
-
-
-# Clip a single ntem to an AOI
-def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir):
+# Clip a single ntem to an AOI. Optially we can specify a bbox in the format of (column_offset, row_offset, width, height)
+def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir, bbox=None):
     with fiona.open(aoi_path, "r") as shapefile:
         for feature in shapefile:
             tile_id = feature["properties"]["Id"]
@@ -118,17 +32,25 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir):
             tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, rasin_name)
             geometry = feature["geometry"]
             shapely_geometry = shape(geometry)
-            bounds = shapely_geometry.bounds
-
-            out_path = tile_dir + f"{rasin_name}-tile-{tile_id}.tif"
-            # Path for normalized image
-            out_norm_path = tile_dir + f"{rasin_name}-tile-{tile_id}-norm.tif"
-            out_norm_path_tmp = add_tmp_to_filename(out_norm_path)
 
             with rasterio.open(rasin_path) as src:
                 profile = src.profile
                 nodata = src.nodatavals
+                bounds = shapely_geometry.bounds
                 win = rasterio.windows.from_bounds(*bounds, transform=src.transform)
+
+                if bbox is not None:
+                    print("Current window shape: ", win.width, win.height)
+                    # Compute a new window based on the bbox
+                    # The bbox should be relative to the top left of the first window
+                    win = rasterio.windows.Window(
+                        win.col_off + bbox[0],
+                        win.row_off + bbox[1],
+                        bbox[2] - bbox[0],
+                        bbox[3] - bbox[1],
+                    )
+                    print("New window shape: ", win.width, win.height)
+
                 win_image = src.read(window=win)
                 # Assert nodata are either a tuple of all None or a tuple of equal values
                 assert all(x is None for x in nodata) or len(set(nodata)) == 1
@@ -142,7 +64,11 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir):
                     crs=src.crs,
                     transform=win_transform,
                 )
-                write_raster_to_file(win_image, out_path, profile)
+                out_path, out_norm_path = make_rasout_names(
+                    tile_dir, rasin_name, tile_id, bbox
+                )
+                out_norm_path_tmp = add_tmp_to_filename(out_norm_path)
+                # write_raster_to_file(win_image, out_path, profile)
                 updated_profile = profile.copy()
                 # Two cases can share the same profile:
                 # Case 1: for BAP, we should not have invalid data (represent the valid range from 1-255)
@@ -196,6 +122,7 @@ def stack_rasters_and_write_to_file(struct_paths, merged_path):
 
 def merge_structure_rasters(config):
     struct_names = []
+    bbox = config["bbox"]
     for rasin_name in config["ntems"]:
         if rasin_name in STRUCTURE_SHORTNAMES:
             struct_names.append(rasin_name)
@@ -211,14 +138,17 @@ def merge_structure_rasters(config):
             struct_paths = []
             for rasin_name in struct_names:
                 tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, rasin_name)
-                struct_paths.append(tile_dir + f"{rasin_name}-tile-{tile_id}-norm.tif")
+                struct_path = tile_dir + f"{rasin_name}-tile-{tile_id}-norm.tif"
+                struct_paths.append(
+                    append_bbox_to_filename_if_exists(struct_path, bbox)
+                )
             # Merge all structure layers into a single raster
             merged_path_prefix = "-".join(
                 [STRUCTURE_SHORTNAMES[name] for name in struct_names]
             )
             tile_merged_path = make_tile_dir_if_not_exist(out_dir, tile_id, "merged")
-            merged_path = (
-                tile_merged_path + f"{merged_path_prefix}-tile-{tile_id}-norm.tif"
+            merged_path = append_bbox_to_filename_if_exists(
+                tile_merged_path + f"{merged_path_prefix}-tile-{tile_id}-norm.tif", bbox
             )
             stack_rasters_and_write_to_file(struct_paths, merged_path)
 
@@ -227,45 +157,82 @@ def crop_vri_shapefile(config):
     aoi_path = config["aoi_path"]
     out_dir = config["out_dir"]
     vri_path = config["vri_path"]
+    bbox = config["bbox"]
 
     print("Reading vri and aoi shapefiles")
     vri = gpd.read_file(vri_path)
     aoi = gpd.read_file(aoi_path)
     print("Finished reading shapefiles")
 
-    for _, tile in aoi.iterrows():
-        tile_id = tile["Id"]
-        if tile_id in EXCLUDED_TILES:
-            continue
-        tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, "VRI")
-        out_ras_path = tile_dir + f"ras-VRI-tile-{tile_id}.tif"
-        out_shp_path = tile_dir + f"VRI-tile-{tile_id}.shp"
+    with rasterio.open(vri_path) as src:  # open the raster file to get the transform
+        transform = src.transform
+        for _, tile in aoi.iterrows():
+            tile_id = tile["Id"]
+            if tile_id in EXCLUDED_TILES:
+                continue
+            tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, "VRI")
+            out_ras_path = append_bbox_to_filename_if_exists(
+                tile_dir + f"ras-VRI-tile-{tile_id}.tif", bbox
+            )
+            out_shp_path = append_bbox_to_filename_if_exists(
+                tile_dir + f"VRI-tile-{tile_id}.shp", bbox
+            )
 
-        print("Cropping VRI for tile: ", tile_id)
-        cropped_vri = gpd.clip(vri, tile.geometry)
-        print("Tile VRI count: ", len(cropped_vri))
-        cropped_vri["Id"] = range(1, len(cropped_vri) + 1)
+            if bbox is not None:
+                column_offset, row_offset, width, height = bbox
+                with rasterio.open(
+                    vri_path
+                ) as src:  # open the raster file to get the transform
+                    transform = src.transform
+                    left, top = xy(transform, column_offset, row_offset)
+                    right, bottom = xy(
+                        transform, column_offset + width, row_offset + height
+                    )
+                bbox = Polygon(
+                    [
+                        (left, bottom),
+                        (left, top),
+                        (right, top),
+                        (right, bottom),
+                        (left, bottom),
+                    ]
+                )
+            else:
+                bbox = tile.geometry
 
-        cropped_vri.to_file(out_shp_path)
-        print("Saved cropped VRI to: ", out_shp_path)
+            minx, miny, maxx, maxy = bbox.bounds  # get the bounds
+            width = maxx - minx
+            height = maxy - miny
+            print(
+                f"Cropping VRI with bbox width {width} and height {height} to tile: {tile_id}"
+            )
 
-        options = gdal.RasterizeOptions(
-            format="GTiff",
-            outputType=gdal.GDT_Float32,
-            noData=-1,
-            creationOptions=["COMPRESS=DEFLATE"],
-            width=5000,
-            height=5000,
-            attribute="Id",
-        )
-        ds = gdal.Rasterize(
-            out_ras_path,
-            out_shp_path,
-            options=options,
-        )
-        ds = None  # Close the file
+            # crop the vector data with the created bounding box
+            cropped_vri = gpd.clip(vri, bbox)
+            # cropped_vri = gpd.clip(vri, tile.geometry)
+            print("Tile VRI count: ", len(cropped_vri))
+            cropped_vri["Id"] = range(1, len(cropped_vri) + 1)
 
-        print(f"Saved cropped rasterized VRI to: {out_ras_path}")
+            cropped_vri.to_file(out_shp_path)
+            print("Saved cropped VRI to: ", out_shp_path)
+
+            options = gdal.RasterizeOptions(
+                format="GTiff",
+                outputType=gdal.GDT_Float32,
+                noData=-1,
+                creationOptions=["COMPRESS=DEFLATE"],
+                width=width,
+                height=height,
+                attribute="Id",
+            )
+            ds = gdal.Rasterize(
+                out_ras_path,
+                out_shp_path,
+                options=options,
+            )
+            ds = None  # Close the file
+
+            print(f"Saved cropped rasterized VRI to: {out_ras_path}")
 
 
 def clip_multiple_ntems_to_aoi(config):
@@ -278,7 +245,9 @@ def clip_multiple_ntems_to_aoi(config):
         rasin_path = find_file(rasin_dir, ".dat")
         print("Processing raster path: ", rasin_path)
         assert rasin_path is not None
-        clip_ntems_to_aoi(rasin_name, rasin_path, config["aoi_path"], out_dir)
+        clip_ntems_to_aoi(
+            rasin_name, rasin_path, config["aoi_path"], out_dir, config["bbox"]
+        )
 
     if config["merge_structures"]:
         merge_structure_rasters(config)
