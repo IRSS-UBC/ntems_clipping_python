@@ -13,7 +13,6 @@ from helper.io_handler import (
     find_file,
     write_raster_to_file,
     change_interleave_with_gdal,
-    add_tmp_to_filename,
     make_tile_dir_if_not_exist,
     make_rasout_names,
     append_bbox_to_filename_if_exists,
@@ -40,7 +39,6 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir, bbox=None):
                 win = rasterio.windows.from_bounds(*bounds, transform=src.transform)
 
                 if bbox is not None:
-                    print("Current window shape: ", win.width, win.height)
                     # Compute a new window based on the bbox
                     # The bbox should be relative to the top left of the first window
                     win = rasterio.windows.Window(
@@ -67,28 +65,20 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir, bbox=None):
                 out_path, out_norm_path = make_rasout_names(
                     tile_dir, rasin_name, tile_id, bbox
                 )
-                out_norm_path_tmp = add_tmp_to_filename(out_norm_path)
-                # write_raster_to_file(win_image, out_path, profile)
+                write_raster_to_file(win_image, out_path, profile)
                 updated_profile = profile.copy()
                 # Two cases can share the same profile:
                 # Case 1: for BAP, we should not have invalid data (represent the valid range from 1-255)
                 # Case 2: for other rasters, we should have invalid data which we will set to 0
                 updated_profile.update(dtype=rasterio.uint8, nodata=0)
-                if rasin_name == "VLCE2.0":
-                    mask = prepare_mask_from_vlce(win_image)
-                    mask_path = tile_dir + f"{rasin_name}-tile-{tile_id}-mask.tif"
-                    write_raster_to_file(mask, mask_path, updated_profile)
-                else:
-                    norm_win_image = normalize_image(win_image, nodata)
-                    write_raster_to_file(
-                        norm_win_image, out_norm_path_tmp, updated_profile
-                    )
-                    change_interleave_with_gdal(out_norm_path_tmp, out_norm_path)
-                    os.remove(out_norm_path_tmp)
+
+                norm_win_image = normalize_image(win_image, nodata)
+                write_raster_to_file(norm_win_image, out_norm_path, updated_profile)
+                # Elaine: you can comment out the line below if you don't need to change the interleave of the raster
+                change_interleave_with_gdal(out_norm_path)
 
 
 def stack_rasters_and_write_to_file(struct_paths, merged_path):
-    merged_path_tmp = add_tmp_to_filename(merged_path)
     raster_datasets = []
     raster_data = []
 
@@ -104,11 +94,10 @@ def stack_rasters_and_write_to_file(struct_paths, merged_path):
         out_meta.update(count=len(raster_datasets))
 
         # Write the stacked raster to disk
-        with rasterio.open(merged_path_tmp, "w", **out_meta) as dest:
+        with rasterio.open(merged_path, "w", **out_meta) as dest:
             for i, data in enumerate(raster_data, start=1):
                 dest.write(np.squeeze(data), i)
-        change_interleave_with_gdal(merged_path_tmp, merged_path)
-        os.remove(merged_path_tmp)
+        change_interleave_with_gdal(merged_path)
         print(f"Stacked structure raster saved at: {merged_path}")
 
     except Exception as e:
@@ -156,83 +145,51 @@ def merge_structure_rasters(config):
 def crop_vri_shapefile(config):
     aoi_path = config["aoi_path"]
     out_dir = config["out_dir"]
+    bbox_config = config["bbox"]
     vri_path = config["vri_path"]
-    bbox = config["bbox"]
-
-    print("Reading vri and aoi shapefiles")
+    print("Reading vri shp path: ", vri_path)
     vri = gpd.read_file(vri_path)
+    print("Original VRI data has {} rows".format(len(vri)))
+    vri = vri[
+        vri["INVENTORY_"] == "V"
+    ]  # This is nessary because the VRI shapefile contains other types of data (e.g. grids)
+    print("VRI data has {} rows after filtering".format(len(vri)))
     aoi = gpd.read_file(aoi_path)
-    print("Finished reading shapefiles")
 
-    with rasterio.open(vri_path) as src:  # open the raster file to get the transform
-        transform = src.transform
-        for _, tile in aoi.iterrows():
-            tile_id = tile["Id"]
-            if tile_id in EXCLUDED_TILES:
-                continue
-            tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, "VRI")
-            out_ras_path = append_bbox_to_filename_if_exists(
-                tile_dir + f"ras-VRI-tile-{tile_id}.tif", bbox
-            )
-            out_shp_path = append_bbox_to_filename_if_exists(
-                tile_dir + f"VRI-tile-{tile_id}.shp", bbox
-            )
-
-            if bbox is not None:
-                column_offset, row_offset, width, height = bbox
-                with rasterio.open(
-                    vri_path
-                ) as src:  # open the raster file to get the transform
-                    transform = src.transform
-                    left, top = xy(transform, column_offset, row_offset)
-                    right, bottom = xy(
-                        transform, column_offset + width, row_offset + height
+    if bbox_config is not None:
+        bbox = gpd.GeoDataFrame(
+            {
+                "geometry": [
+                    Polygon(
+                        [
+                            (bbox_config[0], bbox_config[1]),
+                            (bbox_config[2], bbox_config[1]),
+                            (bbox_config[2], bbox_config[3]),
+                            (bbox_config[0], bbox_config[3]),
+                        ]
                     )
-                bbox = Polygon(
-                    [
-                        (left, bottom),
-                        (left, top),
-                        (right, top),
-                        (right, bottom),
-                        (left, bottom),
-                    ]
-                )
-            else:
-                bbox = tile.geometry
+                ]
+            }
+        )
+        bbox.crs = aoi.crs
 
-            minx, miny, maxx, maxy = bbox.bounds  # get the bounds
-            width = maxx - minx
-            height = maxy - miny
-            print(
-                f"Cropping VRI with bbox width {width} and height {height} to tile: {tile_id}"
-            )
+    for _, tile in aoi.iterrows():
+        tile_id = tile["Id"]
+        if tile_id in EXCLUDED_TILES:
+            continue
+        tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, "VRI")
+        out_shp_path = append_bbox_to_filename_if_exists(
+            tile_dir + f"VRI-tile-{tile_id}.shp", bbox_config
+        )
 
-            # crop the vector data with the created bounding box
-            cropped_vri = gpd.clip(vri, bbox)
-            # cropped_vri = gpd.clip(vri, tile.geometry)
-            print("Tile VRI count: ", len(cropped_vri))
-            cropped_vri["Id"] = range(1, len(cropped_vri) + 1)
+        tile_gdf = gpd.GeoDataFrame([tile.geometry], columns=["geometry"], crs=aoi.crs)
+        vri_cropped = gpd.overlay(vri, tile_gdf, how="intersection")
 
-            cropped_vri.to_file(out_shp_path)
-            print("Saved cropped VRI to: ", out_shp_path)
+        if bbox_config is not None:
+            vri_cropped = gpd.overlay(vri_cropped, bbox, how="intersection")
 
-            options = gdal.RasterizeOptions(
-                format="GTiff",
-                outputType=gdal.GDT_Float32,
-                noData=-1,
-                creationOptions=["COMPRESS=DEFLATE"],
-                width=width,
-                height=height,
-                attribute="Id",
-            )
-            ds = gdal.Rasterize(
-                out_ras_path,
-                out_shp_path,
-                options=options,
-            )
-            ds = None  # Close the file
-
-            print(f"Saved cropped rasterized VRI to: {out_ras_path}")
+        vri_cropped.to_file(out_shp_path)
+        print("Saved cropped VRI to: ", out_shp_path)
 
 
 def clip_multiple_ntems_to_aoi(config):

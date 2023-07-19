@@ -1,5 +1,6 @@
 import os
 import subprocess
+import tempfile
 import rasterio
 import helper.constants as constants
 
@@ -17,8 +18,10 @@ def write_raster_to_file(image, filename, profile):
         dst.write(image)
 
 
-def change_interleave_with_gdal(input_file, output_file):
-    cmd = ["gdal_translate", "-co", "INTERLEAVE=PIXEL", input_file, output_file]
+def change_interleave_with_gdal(input_file):
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as temp_file:
+        temp_file_name = temp_file.name
+    cmd = ["gdal_translate", "-co", "INTERLEAVE=PIXEL", input_file, temp_file_name]
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
 
@@ -26,20 +29,8 @@ def change_interleave_with_gdal(input_file, output_file):
         print(f"Error: {stderr.decode()}")
     else:
         print(f"Success: {stdout.decode()}")
-
-
-def add_tmp_to_filename(path):
-    # split the path into directory, base (file name), and extension
-    dir_name, file_name = os.path.split(path)
-    base, ext = os.path.splitext(file_name)
-
-    # append '_tmp' to the base name, keep the extension the same
-    new_base = base + "_tmp"
-
-    # join all components back into a full path
-    new_path = os.path.join(dir_name, new_base + ext)
-
-    return new_path
+        os.remove(input_file)
+        os.rename(temp_file_name, input_file)
 
 
 def make_tile_dir_if_not_exist(out_dir, tile_id, rasin_name):
@@ -62,7 +53,7 @@ def make_rasout_names(tile_dir, rasin_name, tile_id, bbox=None):
     return out_path, out_norm_path
 
 
-def append_bbox_to_filename_if_exists(filename, bbox=None):
+def append_bbox_to_filename_if_exists(filename, bbox):
     base, ext = os.path.splitext(filename)
 
     # Check if bbox is provided and if it has the correct length

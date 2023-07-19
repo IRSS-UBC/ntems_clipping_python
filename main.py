@@ -33,7 +33,7 @@ def main():
         "--vri_path",
         type=str,
         default="",
-        help="Path to the VRI shapefile",
+        help="path to the VRI shapefile",
     )
     parser.add_argument(
         "--out_dir",
@@ -68,6 +68,7 @@ def main():
     vri_path = args.vri_path
     bbox = args.bbox
     assert bbox is None or len(bbox) == 4
+    print("bbox: ", bbox)
 
     config = {
         "merge_structures": merge_structures,
@@ -76,7 +77,7 @@ def main():
         "rasin_dir": rasin_dir,
         "aoi_path": aoi_path,
         "bbox": bbox,
-        "ntems": ["proxies", "gross_stem_volume", "total_biomass"],
+        "ntems": ["gross_stem_volume", "total_biomass"],
     }
     clip_multiple_ntems_to_aoi(config)
 
