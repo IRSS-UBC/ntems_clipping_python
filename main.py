@@ -77,7 +77,7 @@ def main():
         "rasin_dir": rasin_dir,
         "aoi_path": aoi_path,
         "bbox": bbox,
-        "ntems": ["gross_stem_volume", "total_biomass"],
+        "ntems": ["proxies", "gross_stem_volume", "total_biomass"],
     }
     clip_multiple_ntems_to_aoi(config)
 
