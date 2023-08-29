@@ -4,9 +4,6 @@ import rasterio
 import geopandas as gpd
 import numpy as np
 import os
-from osgeo import gdal
-from rasterio.windows import from_bounds
-from rasterio.transform import xy
 from shapely.geometry import Polygon
 from helper.constants import EXCLUDED_TILES, STRUCTURE_SHORTNAMES
 from helper.io_handler import (
@@ -17,7 +14,7 @@ from helper.io_handler import (
     make_rasout_names,
     append_bbox_to_filename_if_exists,
 )
-from helper.process_raster import normalize_image, prepare_mask_from_vlce
+from helper.process_raster import normalize_image, normalize_age_image
 
 
 # Clip a single ntem to an AOI. Optially we can specify a bbox in the format of (column_offset, row_offset, width, height)
@@ -71,8 +68,11 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir, bbox=None):
                 # Case 1: for BAP, we should not have invalid data (represent the valid range from 1-255)
                 # Case 2: for other rasters, we should have invalid data which we will set to 0
                 updated_profile.update(dtype=rasterio.uint8, nodata=0)
-
-                norm_win_image = normalize_image(win_image, nodata)
+                if rasin_name == "age":
+                    print("Preprocessing age raster")
+                    norm_win_image = normalize_age_image(win_image)
+                else:
+                    norm_win_image = normalize_image(win_image, nodata)
                 write_raster_to_file(norm_win_image, out_norm_path, updated_profile)
                 # Elaine: you can comment out the line below if you don't need to change the interleave of the raster
                 change_interleave_with_gdal(out_norm_path)

@@ -26,6 +26,19 @@ def normalize_image(img, nodata):
     return img
 
 
+def normalize_age_image(img):
+    tree_ages = 2019 - np.floor(img)
+    assert np.nanmin(tree_ages) == 0
+    # Cap the tree ages older than 150 years
+    tree_ages[tree_ages > 150] = 150
+    assert np.nanmax(tree_ages) == 150
+    # Normalize the tree ages to range [1, 255]
+    min_age, max_age = 0, 150  # as we capped at 150
+    normalized_tree_ages = (tree_ages - min_age) / (max_age - min_age) * 254 + 1
+    assert len(normalized_tree_ages.shape) == 3
+    return normalized_tree_ages
+
+
 def prepare_mask_from_vlce(win_image):
     mask = np.zeros(win_image.shape)
     for row in range(win_image.shape[1]):

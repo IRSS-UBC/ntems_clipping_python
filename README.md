@@ -3,7 +3,7 @@
 ### Python script to clip multiple raster images with a shapefile and normalize the files (0-255).
 
 #### Steps: 
-1. Modify the config["ntems"] in `main.py` to include the ntems you want to clip. Possible ntems values are `proxies`, `elev_p95`, `elev_cv`, `gross_stem_volume`, `total_biomass`, and `loreys_height`. 
+1. Modify the config["ntems"] in `main.py` to include the ntems you want to clip. Possible ntems values are `proxies`, `elev_p95`, `elev_cv`, `gross_stem_volume`, `total_biomass`, `loreys_height`, and `age`.
 
 2. Ensure your data directory structure is as follows:
 ```
