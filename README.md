@@ -20,9 +20,14 @@ rasin_dir/
 3. Invoke the python script by running `python main.py --out_dir={your_path} --rasin_dir={your_path} --aoi_path={your_path}`. Optionally, `vri_path` 
 of the inventory shapefile can be passed in to clip the inventory as well.
 
-4. if pass in the `--merge_structures` flag, the normalized structure layers will be merged into a single file under merged/ directory.
+4. if pass in the `--merge_structures` flag, the normalized structure layers will be merged into a single file under merged/ directory. It will only merge structural layers specified in ntems from config.
 
 5. For the usage of defining an extra bounding box to clip, refer to the top comments in `main.py`.
 
 #### Notes:
 It is assumed that your raster files are in the same CRS as the your AOI shapefile.
+
+### Standalone executable:
+This is outside the scope of the `main.py` as it assumes different input data structure.
+
+`crop_species_prob.py`: Crops and processes the species probability raster files. See the top comments in the script for usage.

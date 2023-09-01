@@ -77,7 +77,7 @@ def main():
         "rasin_dir": rasin_dir,
         "aoi_path": aoi_path,
         "bbox": bbox,
-        "ntems": ["age"],
+        "ntems": ["elev_p95", "elev_cv"],
     }
     clip_multiple_ntems_to_aoi(config)
 

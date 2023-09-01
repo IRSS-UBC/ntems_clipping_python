@@ -14,7 +14,11 @@ from helper.io_handler import (
     make_rasout_names,
     append_bbox_to_filename_if_exists,
 )
-from helper.process_raster import normalize_image, normalize_age_image
+from helper.process_raster import (
+    normalize_image,
+    normalize_age_image,
+    prepare_mask_from_vlce,
+)
 
 
 # Clip a single ntem to an AOI. Optially we can specify a bbox in the format of (column_offset, row_offset, width, height)
@@ -68,8 +72,20 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir, bbox=None):
                 # Case 1: for BAP, we should not have invalid data (represent the valid range from 1-255)
                 # Case 2: for other rasters, we should have invalid data which we will set to 0
                 updated_profile.update(dtype=rasterio.uint8, nodata=0)
+                # Note: you must have a structure layer to as template to mask out the invalid pixels in age. For some reason,
+                # using VLCE does not produce the same number of invalid pixels as using the structure layer.
                 if rasin_name == "age":
                     print("Preprocessing age raster")
+                    # struct_path = os.path.join(
+                    #     out_dir,
+                    #     f"tile_{tile_id}",
+                    #     "structure",
+                    #     "gross_stem_volume",
+                    #     f"gross_stem_volume-tile-{tile_id}-norm.tif",
+                    # )
+                    # with rasterio.open(struct_path) as src:
+                    #     struct_template = src.read()
+                    # norm_win_image = normalize_age_image(win_image, struct_template)
                     norm_win_image = normalize_age_image(win_image)
                 else:
                     norm_win_image = normalize_image(win_image, nodata)
@@ -124,6 +140,7 @@ def merge_structure_rasters(config):
             if tile_id in EXCLUDED_TILES:
                 continue
             print(f"Merging {len(struct_names)} structure layers for tile: {tile_id}")
+            print(f"Merging the following structure layers: {struct_names}")
             struct_paths = []
             for rasin_name in struct_names:
                 tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, rasin_name)
