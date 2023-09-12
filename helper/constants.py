@@ -9,8 +9,10 @@ STRUCTURE_SHORTNAMES = {
 # Reference Tile IDs
 BC_QUESNEL_MAP = [473, 474, 475, 434, 435, 436, 395, 396, 397]
 
+ON_MAP = [258, 259, 260, 219, 220, 221, 180, 181, 182]
+
 # Set this to the tile ids you want to exclude
-EXCLUDED_TILES = [435]
+EXCLUDED_TILES = []
 
 FOREST_LULC = {
     81: "wetland-treed",

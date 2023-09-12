@@ -1,4 +1,5 @@
 import numpy as np
+import rasterio
 from helper.constants import FOREST_LULC
 
 
@@ -26,16 +27,32 @@ def normalize_image(img, nodata):
     return img
 
 
-def normalize_age_image(img):
-    tree_ages = 2019 - np.floor(img)
-    assert np.nanmin(tree_ages) == 0
-    # Cap the tree ages older than 150 years
-    tree_ages[tree_ages > 150] = 150
-    assert np.nanmax(tree_ages) == 150
-    # Normalize the tree ages to range [1, 255]
-    min_age, max_age = 0, 150  # as we capped at 150
-    normalized_tree_ages = (tree_ages - min_age) / (max_age - min_age) * 254 + 1
-    assert len(normalized_tree_ages.shape) == 3
+def normalize_age_image(img, template_path, upper_age=150):
+    with rasterio.open(template_path) as src:
+        template = src.read()
+        nodata_value = src.nodata
+        print("nodata from template is ", nodata_value)
+        tree_ages = 2019 - np.floor(img)
+        assert np.nanmin(tree_ages) == 0
+        # Cap the tree ages older than 150 years
+        if upper_age == 150:
+            tree_ages[tree_ages > upper_age] = upper_age
+            assert np.nanmax(tree_ages) == upper_age
+
+        else:
+            # Because Jame's forest age layer is nosiy outside the NTEMS period, we might want to cap the upper age to 34 year old (since 1984).
+            # Normalization is not neccessary in that case.
+            tree_ages[tree_ages > upper_age] = upper_age + 1
+            tree_ages = tree_ages + 1
+            assert np.nanmax(tree_ages) == upper_age + 2
+            assert np.nanmin(tree_ages) == 1
+            tree_ages[template == nodata_value] = 0
+            return tree_ages
+
+        min_age, max_age = 0, upper_age
+        normalized_tree_ages = (tree_ages - min_age) / (max_age - min_age) * 254 + 1
+        assert len(normalized_tree_ages.shape) == 3
+        normalized_tree_ages[template == nodata_value] = 0
     return normalized_tree_ages
 
 

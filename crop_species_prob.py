@@ -105,10 +105,10 @@ def write_output_raster(
 
 def main():
     study_area_filepath = (
-        "/home/yye/first_project/ntems_2019/bc/bc_quesnel_study_area.shp"
+        "/home/yye/first_project/ntems_2019/on/on_romeo_malette_study_area.shp"
     )
     species_dir = "/mnt/e/cfs/2019_CA_forest_tree_species_probabilities/"
-    out_dir = "/home/yye/first_project/ntems_2019/bc/processed_tiles/"
+    out_dir = "/home/yye/first_project/ntems_2019/on/processed_tiles/"
 
     study_area = load_study_area(study_area_filepath)
     filepaths = get_filepaths(species_dir)

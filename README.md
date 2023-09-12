@@ -31,3 +31,6 @@ It is assumed that your raster files are in the same CRS as the your AOI shapefi
 This is outside the scope of the `main.py` as it assumes different input data structure.
 
 `crop_species_prob.py`: Crops and processes the species probability raster files. See the top comments in the script for usage.
+
+`mosaic_rasters.py`: After getting different raster layers under UTM zone directory such as 11S, use this script to mosaic each type (proxies, elev_cv, etc) of rasters into one raster. The default
+crs to reproject is EPSG:3978. This should be run before running `main.py` to clip the raster layers.

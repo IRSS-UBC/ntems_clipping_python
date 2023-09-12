@@ -76,17 +76,18 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir, bbox=None):
                 # using VLCE does not produce the same number of invalid pixels as using the structure layer.
                 if rasin_name == "age":
                     print("Preprocessing age raster")
-                    # struct_path = os.path.join(
-                    #     out_dir,
-                    #     f"tile_{tile_id}",
-                    #     "structure",
-                    #     "gross_stem_volume",
-                    #     f"gross_stem_volume-tile-{tile_id}-norm.tif",
-                    # )
-                    # with rasterio.open(struct_path) as src:
-                    #     struct_template = src.read()
-                    # norm_win_image = normalize_age_image(win_image, struct_template)
-                    norm_win_image = normalize_age_image(win_image)
+                    struct_path = os.path.join(
+                        out_dir,
+                        f"tile_{tile_id}",
+                        "structure",
+                        "gross_stem_volume",
+                        f"gross_stem_volume-tile-{tile_id}-norm.tif",
+                    )
+                    print("template path: ", struct_path)
+                    norm_win_image = normalize_age_image(
+                        win_image,
+                        struct_path,
+                    )
                 else:
                     norm_win_image = normalize_image(win_image, nodata)
                 write_raster_to_file(norm_win_image, out_norm_path, updated_profile)
