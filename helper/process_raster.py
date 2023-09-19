@@ -27,7 +27,9 @@ def normalize_image(img, nodata):
     return img
 
 
-def normalize_age_image(img, template_path, upper_age=150):
+# This is the current version of normalizing age image
+def normalize_age_image(img, template_path):
+    upper_age = 150
     with rasterio.open(template_path) as src:
         template = src.read()
         nodata_value = src.nodata
@@ -35,25 +37,76 @@ def normalize_age_image(img, template_path, upper_age=150):
         tree_ages = 2019 - np.floor(img)
         assert np.nanmin(tree_ages) == 0
         # Cap the tree ages older than 150 years
-        if upper_age == 150:
-            tree_ages[tree_ages > upper_age] = upper_age
-            assert np.nanmax(tree_ages) == upper_age
 
-        else:
-            # Because Jame's forest age layer is nosiy outside the NTEMS period, we might want to cap the upper age to 34 year old (since 1984).
-            # Normalization is not neccessary in that case.
-            tree_ages[tree_ages > upper_age] = upper_age + 1
-            tree_ages = tree_ages + 1
-            assert np.nanmax(tree_ages) == upper_age + 2
-            assert np.nanmin(tree_ages) == 1
-            tree_ages[template == nodata_value] = 0
-            return tree_ages
+        tree_ages[tree_ages > upper_age] = upper_age
 
         min_age, max_age = 0, upper_age
         normalized_tree_ages = (tree_ages - min_age) / (max_age - min_age) * 254 + 1
         assert len(normalized_tree_ages.shape) == 3
         normalized_tree_ages[template == nodata_value] = 0
     return normalized_tree_ages
+
+
+def normalize_age_image_z_score(img, template_path, new_nodata):
+    upper_age = 150
+
+    with rasterio.open(template_path) as src:
+        template = src.read()
+        nodata_value = src.nodata
+        print("nodata from template is ", nodata_value)
+
+        tree_ages = 2019 - np.floor(img)
+        assert np.nanmin(tree_ages) == 0
+
+        # Cap the tree ages older than 150 years
+        tree_ages[tree_ages > upper_age] = upper_age
+
+        # Store the original nodata locations
+        nodata_mask = template == nodata_value
+
+        # Replace nodata with NaN for normalization
+        tree_ages[nodata_mask] = np.nan
+
+        mean_tree_ages = np.nanmean(tree_ages)
+
+        # Normalize to mean 0 and standard deviation 1
+        normalized_tree_ages = (tree_ages - mean_tree_ages) / np.nanstd(tree_ages)
+
+        assert np.all(normalized_tree_ages) != 0
+
+        # Handle nodata: Set NaN values back to NEW_NODATA_VALUE
+        normalized_tree_ages[np.isnan(normalized_tree_ages)] = new_nodata
+
+    return normalized_tree_ages
+
+
+def create_mask(raster_path):
+    """Create a binary mask with 1 for valid data and 0 for nodata"""
+    with rasterio.open(raster_path) as src:
+        band = src.read()
+        nodata_value = src.nodata
+        print("nodata value in raster_path ", raster_path, " is ", nodata_value)
+
+        # Use numpy to create a mask where change is 1 and no change is -1
+        mask = np.where((band == nodata_value) | (band == 2020), -1, 1)
+
+    return mask
+
+
+# This function is for experiment when I combined fire and harvest layer with the age layer. Safely ignore it.
+def process_age_image(img, template_path, new_nodata, fire_path, harvest_path):
+    normalized_age = normalize_age_image_z_score(img, template_path, new_nodata)
+
+    fire_mask = create_mask(fire_path)
+    harvest_mask = create_mask(harvest_path)
+
+    fire_mask[normalized_age == 0] = 0
+    harvest_mask[normalized_age == 0] = 0
+
+    masks_float32 = [fire_mask.astype(np.float32), harvest_mask.astype(np.float32)]
+    combined_data = np.vstack([normalized_age] + masks_float32)
+
+    return combined_data
 
 
 def prepare_mask_from_vlce(win_image):

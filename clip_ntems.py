@@ -17,7 +17,6 @@ from helper.io_handler import (
 from helper.process_raster import (
     normalize_image,
     normalize_age_image,
-    prepare_mask_from_vlce,
 )
 
 
@@ -84,6 +83,16 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir, bbox=None):
                         f"gross_stem_volume-tile-{tile_id}-norm.tif",
                     )
                     print("template path: ", struct_path)
+                    # The fire and harvest are for previous experiments. You can ignore them.
+                    fire_path = os.path.join(
+                        out_dir, f"tile_{tile_id}", "fire", f"fire-tile-{tile_id}.tif"
+                    )
+                    harvest_path = os.path.join(
+                        out_dir,
+                        f"tile_{tile_id}",
+                        "harvest",
+                        f"harvest-tile-{tile_id}.tif",
+                    )
                     norm_win_image = normalize_age_image(
                         win_image,
                         struct_path,
