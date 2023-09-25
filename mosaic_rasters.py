@@ -1,3 +1,5 @@
+# This script mosaicks each raster file across {UTM_zone} directory and saves the mosaicked file with EPSG:3978 projection.
+
 import os
 import rasterio
 from rasterio.merge import merge
@@ -9,8 +11,8 @@ def find_raster_groups(input_base):
     """
     Finds groups of raster files based on directory structure.
     """
-    # Use glob to recursively find all .dat files
-    raster_files = glob.glob(f"{input_base}/[0-9]*/*/*.dat", recursive=True)
+    # Use glob to recursively find all .dat files. Update this accordingly.
+    raster_files = glob.glob(f"{input_base}/[0-9]*/**/*/*.dat", recursive=True)
     print("All the raster files to be mosaicked are ", raster_files)
 
     # Group files by their directory structure (after the number, like 9S, 10S)
@@ -53,8 +55,6 @@ def mosaic_rasters(file_groups, output_base, dst_crs="EPSG:3978"):
     """
     # Process each group of files
     for dir_structure, files in file_groups.items():
-        if dir_structure != "proxies":
-            continue
         print(f"Processing group: {dir_structure}")
 
         reprojected_rasters = [
@@ -96,9 +96,8 @@ def mosaic_rasters(file_groups, output_base, dst_crs="EPSG:3978"):
 
 if __name__ == "__main__":
     # Base directories for input and output
-    input_base = "/mnt/e/cfs/first_project/ntems_2019/on_thunder"
-    output_base = "/mnt/e/cfs/first_project/ntems_2019/on_thunder_update/mosaiced"
+    input_base = "/mnt/e/cfs/first_project/ntems_2019/nb"
+    output_base = "/mnt/e/cfs/first_project/ntems_2019/nb/mosaiced"
 
     raster_groups = find_raster_groups(input_base)
-    # print(raster_groups)
     mosaic_rasters(raster_groups, output_base)
