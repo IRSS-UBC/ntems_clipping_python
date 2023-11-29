@@ -12,6 +12,15 @@
 import ast
 from clip_ntems import clip_multiple_ntems_to_aoi
 import argparse
+from loguru import logger
+
+
+logger.add(
+    "logs/main.log",
+    format="{time} {level} {message}",
+    level="INFO",
+    rotation="1 week",
+)
 
 
 def tuple_type(s):
@@ -32,7 +41,7 @@ def main():
     parser.add_argument(
         "--vri_path",
         type=str,
-        default="",
+        default="/mnt/f/first_project_backup/ntems_2019/provincial_vegetation_inventory/final_bc_vri.shp",
         help="path to the VRI shapefile",
     )
     parser.add_argument(
@@ -50,7 +59,7 @@ def main():
     parser.add_argument(
         "--aoi_path",
         type=str,
-        default="/home/yye/first_project/ntems_2019/bc/bc_quesnel_study_area.shp",
+        default="/home/yye/first_project/elaine_study_area/final_study_area/quesnel_study_area.shp",
         help="Path to the shapefile containing the AOI",
     )
     parser.add_argument(
@@ -58,6 +67,12 @@ def main():
         type=tuple_type,
         default=None,
         help="Bounding box (column_offset, row_offset, width, height)",
+    )
+    parser.add_argument(
+        "--study_area",
+        type=str,
+        help="choose from bc, ab, on, and nb",
+        default="bc",
     )
     args = parser.parse_args()
     # Get the arguments if not empty
@@ -67,6 +82,7 @@ def main():
     aoi_path = args.aoi_path
     vri_path = args.vri_path
     bbox = args.bbox
+    study_area = args.study_area
     assert bbox is None or len(bbox) == 4
     print("bbox: ", bbox)
 
@@ -77,7 +93,8 @@ def main():
         "rasin_dir": rasin_dir,
         "aoi_path": aoi_path,
         "bbox": bbox,
-        "ntems": ["elev_p95", "elev_cv"],
+        "ntems": [],
+        "study_area": study_area,
     }
     clip_multiple_ntems_to_aoi(config)
 

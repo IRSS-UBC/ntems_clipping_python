@@ -5,7 +5,11 @@ import geopandas as gpd
 import numpy as np
 import os
 from shapely.geometry import Polygon
-from helper.constants import EXCLUDED_TILES, STRUCTURE_SHORTNAMES
+from helper.constants import (
+    STUDY_AREA_TILES,
+    STRUCTURE_SHORTNAMES,
+    FORESTED_POLYGON_CODE,
+)
 from helper.io_handler import (
     find_file,
     write_raster_to_file,
@@ -18,19 +22,23 @@ from helper.process_raster import (
     normalize_image,
     normalize_age_image,
 )
+from loguru import logger
 
 
 # Clip a single ntem to an AOI. Optially we can specify a bbox in the format of (column_offset, row_offset, width, height)
-def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir, bbox=None):
+def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir, study_area, bbox=None):
     with fiona.open(aoi_path, "r") as shapefile:
         for feature in shapefile:
             tile_id = feature["properties"]["Id"]
-            if tile_id in EXCLUDED_TILES:
+            if tile_id not in STUDY_AREA_TILES[study_area]:
                 continue
-            print("Processing tile: ", tile_id)
+            logger.info("Processing tile: ", tile_id)
             tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, rasin_name)
             geometry = feature["geometry"]
             shapely_geometry = shape(geometry)
+            out_path, out_norm_path = make_rasout_names(
+                tile_dir, rasin_name, tile_id, bbox
+            )
 
             with rasterio.open(rasin_path) as src:
                 profile = src.profile
@@ -47,13 +55,13 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir, bbox=None):
                         bbox[2] - bbox[0],
                         bbox[3] - bbox[1],
                     )
-                    print("New window shape: ", win.width, win.height)
+                    logger.info("New window shape: ", win.width, win.height)
 
                 win_image = src.read(window=win)
                 # Assert nodata are either a tuple of all None or a tuple of equal values
                 assert all(x is None for x in nodata) or len(set(nodata)) == 1
                 nodata = nodata[0]
-                print("win image shape: ", win_image.shape)
+                logger.info("win image shape: ", win_image.shape)
                 win_transform = src.window_transform(win)
                 profile.update(
                     width=win_image.shape[2],
@@ -61,9 +69,6 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir, bbox=None):
                     count=win_image.shape[0],
                     crs=src.crs,
                     transform=win_transform,
-                )
-                out_path, out_norm_path = make_rasout_names(
-                    tile_dir, rasin_name, tile_id, bbox
                 )
                 write_raster_to_file(win_image, out_path, profile)
                 updated_profile = profile.copy()
@@ -74,7 +79,7 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir, bbox=None):
                 # Note: you must have a structure layer to as template to mask out the invalid pixels in age. For some reason,
                 # using VLCE does not produce the same number of invalid pixels as using the structure layer.
                 if rasin_name == "age":
-                    print("Preprocessing age raster")
+                    logger.info("Preprocessing age raster")
                     struct_path = os.path.join(
                         out_dir,
                         f"tile_{tile_id}",
@@ -82,17 +87,7 @@ def clip_ntems_to_aoi(rasin_name, rasin_path, aoi_path, out_dir, bbox=None):
                         "gross_stem_volume",
                         f"gross_stem_volume-tile-{tile_id}-norm.tif",
                     )
-                    print("template path: ", struct_path)
-                    # The fire and harvest are for previous experiments. You can ignore them.
-                    fire_path = os.path.join(
-                        out_dir, f"tile_{tile_id}", "fire", f"fire-tile-{tile_id}.tif"
-                    )
-                    harvest_path = os.path.join(
-                        out_dir,
-                        f"tile_{tile_id}",
-                        "harvest",
-                        f"harvest-tile-{tile_id}.tif",
-                    )
+                    logger.info("template path: ", struct_path)
                     norm_win_image = normalize_age_image(
                         win_image,
                         struct_path,
@@ -124,10 +119,10 @@ def stack_rasters_and_write_to_file(struct_paths, merged_path):
             for i, data in enumerate(raster_data, start=1):
                 dest.write(np.squeeze(data), i)
         change_interleave_with_gdal(merged_path)
-        print(f"Stacked structure raster saved at: {merged_path}")
+        logger.info(f"Stacked structure raster saved at: {merged_path}")
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logger.error(f"An error occurred: {e}")
 
     finally:
         # Close all raster datasets
@@ -141,16 +136,18 @@ def merge_structure_rasters(config):
     for rasin_name in config["ntems"]:
         if rasin_name in STRUCTURE_SHORTNAMES:
             struct_names.append(rasin_name)
-
+    study_area = config["study_area"]
     aoi_path = config["aoi_path"]
     out_dir = config["out_dir"]
     with fiona.open(aoi_path, "r") as shapefile:
         for feature in shapefile:
             tile_id = feature["properties"]["Id"]
-            if tile_id in EXCLUDED_TILES:
+            if tile_id not in STUDY_AREA_TILES[study_area]:
                 continue
-            print(f"Merging {len(struct_names)} structure layers for tile: {tile_id}")
-            print(f"Merging the following structure layers: {struct_names}")
+            logger.info(
+                f"Merging {len(struct_names)} structure layers for tile: {tile_id}"
+            )
+            logger.info(f"Merging the following structure layers: {struct_names}")
             struct_paths = []
             for rasin_name in struct_names:
                 tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, rasin_name)
@@ -169,18 +166,28 @@ def merge_structure_rasters(config):
             stack_rasters_and_write_to_file(struct_paths, merged_path)
 
 
+def filter_forested_polygon_from_vri(vri_path: str, study_area: str):
+    logger.info(f"Reading VRI data for study area: {study_area}")
+    vri = gpd.read_file(vri_path)
+    logger.info(f"Original VRI data has {len(vri)} rows")
+    if study_area in FORESTED_POLYGON_CODE:
+        vri_field_codes = FORESTED_POLYGON_CODE[study_area]
+        for key, values in vri_field_codes.items():
+            field = key
+            codes = values
+            filtered_vri = vri[vri[field].isin(codes)]
+            logger.info(f"Filtered VRI data has {len(filtered_vri)} rows")
+        return filtered_vri
+    return vri
+
+
 def crop_vri_shapefile(config):
     aoi_path = config["aoi_path"]
     out_dir = config["out_dir"]
     bbox_config = config["bbox"]
     vri_path = config["vri_path"]
-    print("Reading vri shp path: ", vri_path)
-    vri = gpd.read_file(vri_path)
-    print("Original VRI data has {} rows".format(len(vri)))
-    vri = vri[
-        vri["INVENTORY_"] == "V"
-    ]  # This is nessary because the VRI shapefile contains other types of data (e.g. grids)
-    print("VRI data has {} rows after filtering".format(len(vri)))
+    study_area = config["study_area"]
+    vri = filter_forested_polygon_from_vri(vri_path, study_area)
     aoi = gpd.read_file(aoi_path)
 
     if bbox_config is not None:
@@ -202,7 +209,7 @@ def crop_vri_shapefile(config):
 
     for _, tile in aoi.iterrows():
         tile_id = tile["Id"]
-        if tile_id in EXCLUDED_TILES:
+        if tile_id not in STUDY_AREA_TILES[study_area]:
             continue
         tile_dir = make_tile_dir_if_not_exist(out_dir, tile_id, "VRI")
         out_shp_path = append_bbox_to_filename_if_exists(
@@ -216,7 +223,7 @@ def crop_vri_shapefile(config):
             vri_cropped = gpd.overlay(vri_cropped, bbox, how="intersection")
 
         vri_cropped.to_file(out_shp_path)
-        print("Saved cropped VRI to: ", out_shp_path)
+        logger.info(f"Saved cropped VRI to: {out_shp_path}")
 
 
 def clip_multiple_ntems_to_aoi(config):
@@ -227,10 +234,15 @@ def clip_multiple_ntems_to_aoi(config):
         else:
             rasin_dir = os.path.join(config["rasin_dir"], rasin_name)
         rasin_path = find_file(rasin_dir, ".dat")
-        print("Processing raster path: ", rasin_path)
+        logger.info("Processing raster path: ", rasin_path)
         assert rasin_path is not None
         clip_ntems_to_aoi(
-            rasin_name, rasin_path, config["aoi_path"], out_dir, config["bbox"]
+            rasin_name,
+            rasin_path,
+            config["aoi_path"],
+            out_dir,
+            config["study_area"],
+            config["bbox"],
         )
 
     if config["merge_structures"]:
