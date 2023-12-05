@@ -170,14 +170,19 @@ def filter_forested_polygon_from_vri(vri_path: str, study_area: str):
     logger.info(f"Reading VRI data for study area: {study_area}")
     vri = gpd.read_file(vri_path)
     logger.info(f"Original VRI data has {len(vri)} rows")
+
     if study_area in FORESTED_POLYGON_CODE:
         vri_field_codes = FORESTED_POLYGON_CODE[study_area]
+        filtered_vri = vri.copy()
+
         for key, values in vri_field_codes.items():
             field = key
             codes = values
-            filtered_vri = vri[vri[field].isin(codes)]
-            logger.info(f"Filtered VRI data has {len(filtered_vri)} rows")
+            filtered_vri = filtered_vri[filtered_vri[field].isin(codes)]
+
+        logger.info(f"Filtered VRI data has {len(filtered_vri)} rows")
         return filtered_vri
+
     return vri
 
 

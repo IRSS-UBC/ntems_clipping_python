@@ -46,7 +46,7 @@ FOREST_LULC = {
 # computing the summary statistics.
 # Note: we already got the forested polygons for New Brunswick.
 FORESTED_POLYGON_CODE = {
-    "bc": {"BCLCS_LE_1": ["T"]},
+    "bc": {"BCLCS_LE_1": ["T"], "INVENTORY_": ["V"]},
     "ab": {"DENSITY": ["A", "B", "C", "D"]},
     "on": {"POLYTYPE": ["FOR"]},
 }
